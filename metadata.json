@@ -1,0 +1,6 @@
+{
+  "name": "Field Tech Hub",
+  "description": "High-conversion field service landing page with an interactive Unisys mobile app simulator, localized ticket views, dynamic language switching, and secure request access form.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
