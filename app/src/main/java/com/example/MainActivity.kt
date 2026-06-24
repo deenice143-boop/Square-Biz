@@ -33,24 +33,48 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import android.speech.SpeechRecognizer
+import android.speech.RecognizerIntent
+import android.speech.RecognitionListener
+import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
+import android.Manifest
+import android.widget.Toast
+import org.json.JSONArray
+import org.json.JSONObject
+import android.content.Context
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            MyApplicationTheme {
+            var isDarkModeState by remember { mutableStateOf<Boolean?>(null) }
+            val systemDark = isSystemInDarkTheme()
+            val isDark = isDarkModeState ?: systemDark
+
+            MyApplicationTheme(darkTheme = isDark) {
                 Scaffold(
                     modifier = Modifier.fillMaxSize()
                 ) { innerPadding ->
                     LandingPageScreen(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(innerPadding)
+                            .padding(innerPadding),
+                        isDarkMode = isDark,
+                        onThemeToggle = {
+                            isDarkModeState = !isDark
+                        }
                     )
                 }
             }
@@ -94,14 +118,15 @@ data class ServiceNowStrings(
     val priorityValue: String,
     val categoryLabel: String,
     val categoryValue: String,
-    val siteLabel: String
+    val siteLabel: String,
+    val techIdLabel: String
 )
 
 private val localizedStrings = mapOf(
     "EN" to ServiceNowStrings(
-        appTitle = "UNISYS support",
+        appTitle = "D Graham support",
         ticketDetails = "ID: INC-2026-9904",
-        statusLabel = "Inc. Status",
+        statusLabel = "Status",
         clientNotesLabel = "ServiceNow Client Notes",
         resolveButton = "Resolve Ticket",
         statusInProgress = "In Progress",
@@ -116,14 +141,15 @@ private val localizedStrings = mapOf(
         successText = "Ticket status synchronized securely.",
         priorityLabel = "Priority",
         priorityValue = "P1 - Critical",
-        categoryLabel = "Category",
+        categoryLabel = "Issue Type",
         categoryValue = "Hardware Provisioning",
-        siteLabel = "Site Node"
+        siteLabel = "Site Node",
+        techIdLabel = "Technician ID"
     ),
     "ES" to ServiceNowStrings(
-        appTitle = "servicio UNISYS",
+        appTitle = "servicio D Graham",
         ticketDetails = "ID: INC-2026-9904",
-        statusLabel = "Est. Incidente",
+        statusLabel = "Estado",
         clientNotesLabel = "Notas de Cliente ServiceNow",
         resolveButton = "Resolver Incidente",
         statusInProgress = "En Progreso",
@@ -138,14 +164,15 @@ private val localizedStrings = mapOf(
         successText = "Estado del ticket sincronizado de forma segura.",
         priorityLabel = "Prioridad",
         priorityValue = "P1 - Crítico",
-        categoryLabel = "Categoría",
+        categoryLabel = "Tipo de Incidencia",
         categoryValue = "Suministro de Hardware",
-        siteLabel = "Nodo del Sitio"
+        siteLabel = "Nodo del Sitio",
+        techIdLabel = "ID del Técnico"
     ),
     "FR" to ServiceNowStrings(
-        appTitle = "centre UNISYS",
+        appTitle = "centre D Graham",
         ticketDetails = "ID: INC-2026-9904",
-        statusLabel = "Statut Inc.",
+        statusLabel = "Statut",
         clientNotesLabel = "Notes Client ServiceNow",
         resolveButton = "Résoudre l'Incident",
         statusInProgress = "En Cours",
@@ -160,31 +187,50 @@ private val localizedStrings = mapOf(
         successText = "Statut du ticket synchronisé en toute sécurité.",
         priorityLabel = "Priorité",
         priorityValue = "P1 - Critique",
-        categoryLabel = "Catégorie",
+        categoryLabel = "Type d'Incident",
         categoryValue = "Raccordement Matériel",
-        siteLabel = "Nœud du Site"
+        siteLabel = "Nœud du Site",
+        techIdLabel = "ID du Technicien"
     )
 )
 
 @Composable
-fun LandingPageScreen(modifier: Modifier = Modifier) {
+fun LandingPageScreen(
+    modifier: Modifier = Modifier,
+    isDarkMode: Boolean = LocalThemeDark.current,
+    onThemeToggle: () -> Unit = {}
+) {
+    val theme = getThemeColors(isDarkMode)
+    val CleanWhite = theme.CleanWhite
+    val SlateNavy = theme.SlateNavy
+    val SlateSubtle = theme.SlateSubtle
+    val BorderSlate = theme.BorderSlate
+    val LightBackground = theme.LightBackground
+    val UnisysBlue = theme.UnisysBlue
+    val AccentTechBlue = theme.AccentTechBlue
+
+    val context = LocalContext.current
+    var recentSubmittedTicketsState by remember {
+        mutableStateOf(loadRecentTicketsFromStorage(context))
+    }
+
     val coroutineScope = rememberCoroutineScope()
     var systemLanguage by remember { mutableStateOf("EN") }
     var activeTicketsState by remember {
-        mutableStateOf(
-            listOf(
-                ServiceRequest(
+        val initialRecent = loadRecentTicketsFromStorage(context)
+        val defaultList = listOf(
+            ServiceRequest(
                     id = "INC-2026-9904",
                     title = "Server rack 4B router manual termination",
                     priority = "P1 - Critical",
                     category = "Hardware Provisioning",
                     status = "In Progress",
-                    site = "Unisys Node #4592",
+                    site = "D Graham Node #4592",
                     clientNotes = "Server rack 4B router needs manual fiber optic line termination at site #12.",
                     updatedTime = "10m ago",
                     technicianNotes = "Manual fiber optic alignment required. Splice tray #3 is saturated. Signal calibration is on-hold until splicing is verified.",
                     timestamp = "2026-06-22 11:10:45 UTC",
-                    customerContact = "Sarah Jenkins (sjenkins@unisys-networks.com) - +1 (555) 014-9904"
+                    customerContact = "Sarah Jenkins (sjenkins@dgraham-networks.com) - +1 (555) 014-9904"
                 ),
                 ServiceRequest(
                     id = "INC-2026-9912",
@@ -192,12 +238,12 @@ fun LandingPageScreen(modifier: Modifier = Modifier) {
                     priority = "P1 - Critical",
                     category = "Power Systems",
                     status = "In Progress",
-                    site = "Unisys Node #1024",
+                    site = "D Graham Node #1024",
                     clientNotes = "Generator failed dual automation grid checks during test cycle.",
                     updatedTime = "45m ago",
                     technicianNotes = "Tested relays and confirmed solenoid coil malfunction. Replacement coil is dispatched. Site cooling system must hold secondary loads.",
                     timestamp = "2026-06-22 10:35:12 UTC",
-                    customerContact = "Marcus Brody (mbrody@unisys-power.com) - +1 (555) 017-9912"
+                    customerContact = "Marcus Brody (mbrody@dgraham-power.com) - +1 (555) 017-9912"
                 ),
                 ServiceRequest(
                     id = "INC-2026-9920",
@@ -205,12 +251,12 @@ fun LandingPageScreen(modifier: Modifier = Modifier) {
                     priority = "P2 - High",
                     category = "Database Operations",
                     status = "In Progress",
-                    site = "Unisys Node #9011",
+                    site = "D Graham Node #9011",
                     clientNotes = "Replication backlog exceeded 500k records. High risk of split-brain.",
                     updatedTime = "1h ago",
                     technicianNotes = "Primary node storage buffer filled up due to rapid ingestion rate. Clearing old cache tables and throttling temporary staging write locks.",
                     timestamp = "2026-06-22 10:20:00 UTC",
-                    customerContact = "Lina Chen (lchen@unisys-data.com) - +1 (555) 019-9920"
+                    customerContact = "Lina Chen (lchen@dgraham-data.com) - +1 (555) 019-9920"
                 ),
                 ServiceRequest(
                     id = "INC-2026-9935",
@@ -218,12 +264,12 @@ fun LandingPageScreen(modifier: Modifier = Modifier) {
                     priority = "P3 - Moderate",
                     category = "Telecommunications",
                     status = "Resolved",
-                    site = "Unisys Node #3312",
+                    site = "D Graham Node #3312",
                     clientNotes = "Sub-sea optical cable carrier reported 3dB path attenuation.",
                     updatedTime = "4h ago",
                     technicianNotes = "Backbone diversion route verified. Attenuation normalized down to 0.4dB. Path verified via OTDR diagnostics sweep.",
                     timestamp = "2026-06-22 07:15:33 UTC",
-                    customerContact = "Darrin Vance (dvance@unisys-telecom.com) - +1 (555) 012-9935"
+                    customerContact = "Darrin Vance (dvance@dgraham-telecom.com) - +1 (555) 012-9935"
                 ),
                 ServiceRequest(
                     id = "INC-2026-9941",
@@ -231,16 +277,16 @@ fun LandingPageScreen(modifier: Modifier = Modifier) {
                     priority = "P4 - Low",
                     category = "HVAC & Facilities",
                     status = "In Progress",
-                    site = "Unisys Node #0056",
+                    site = "D Graham Node #0056",
                     clientNotes = "High compressor winding temperature detected during continuous peak load.",
                     updatedTime = "5h ago",
                     technicianNotes = "HVAC unit #2 auxiliary fan power cycle completed. Temperature trending down (now 62C down from 85C). Thermal limits are stable.",
                     timestamp = "2026-06-22 06:10:22 UTC",
-                    customerContact = "Patricia Miller (pmiller@unisys-hq.com) - +1 (555) 011-9941"
+                    customerContact = "Patricia Miller (pmiller@dgraham-hq.com) - +1 (555) 011-9941"
                 )
             )
-        )
-    }
+            mutableStateOf(initialRecent + defaultList)
+        }
     var selectedTicketId by remember { mutableStateOf("INC-2026-9904") }
     var simulatorViewMode by remember { mutableStateOf("dashboard") } // default to "dashboard" to show off the ticker dashboard view immediately
 
@@ -270,24 +316,101 @@ fun LandingPageScreen(modifier: Modifier = Modifier) {
     var isRunningDiagnosticScanner by remember { mutableStateOf(false) }
     var diagnosticSecurityStatusText by remember { mutableStateOf("Ready to initiate FIPS handshake scan.") }
 
+    // App Download simulated states
+    var isDownloadingApp by remember { mutableStateOf(false) }
+    var downloadProgress by remember { mutableStateOf(0f) }
+
     fun addSyncLog(message: String) {
         val timeStamp = "11:09:${(10..59).random()}"
         syncHistoryList = syncHistoryList + "$timeStamp $message"
+    }
+
+    val onDownloadAppClick: () -> Unit = {
+        if (!isDownloadingApp) {
+            coroutineScope.launch {
+                isDownloadingApp = true
+                downloadProgress = 0f
+                addSyncLog("📥 [DOWNLOAD] Initiated secure download of ServiceNow Integration Client APK...")
+                while (downloadProgress < 1f) {
+                    delay(150)
+                    downloadProgress += 0.1f
+                    if (downloadProgress > 1f) downloadProgress = 1f
+                }
+                addSyncLog("✓ [DOWNLOAD] Download complete. dgraham_field_hub_v2.1.4.apk saved to local storage.")
+                Toast.makeText(context, "Download complete: dgraham_field_hub_v2.1.4.apk successfully saved.", Toast.LENGTH_LONG).show()
+                isDownloadingApp = false
+            }
+        }
+    }
+
+    val onAddTicket: (String, String, String, String, String, String, String) -> Unit = { title, category, priority, techId, site, notes, contact ->
+        val newId = "INC-2026-${(1000..9999).random()}"
+        val newTicket = ServiceRequest(
+            id = newId,
+            title = title,
+            priority = priority,
+            category = category,
+            status = "In Progress",
+            site = site,
+            clientNotes = notes,
+            updatedTime = "Just now",
+            technicianNotes = "Awaiting deployment of technician $techId.",
+            timestamp = "2026-06-23 13:58:00 UTC",
+            customerContact = contact
+        )
+        activeTicketsState = listOf(newTicket) + activeTicketsState
+        selectedTicketId = newId
+        val updatedRecent = (listOf(newTicket) + recentSubmittedTicketsState).take(5)
+        recentSubmittedTicketsState = updatedRecent
+        saveRecentTicketsToStorage(context, updatedRecent)
+        if (offlineModeEnabled) {
+            localBufferedQueues += 1
+            addSyncLog("⚠️ [QUEUE] Queued new incident $newId locally. Tech ID: $techId, Issue Type: $category.")
+        } else {
+            addSyncLog("✓ [CREATE] Dispatched new incident $newId directly to ServiceNow. Tech: $techId, Category: $category.")
+        }
     }
 
     BoxWithConstraints(
         modifier = modifier
             .background(LightBackground)
             .fillMaxSize()
-            .verticalScroll(rememberScrollState())
     ) {
         val widthDp = maxWidth
         val isWideLayout = widthDp >= 760.dp
 
+        // Stylish Tech-related background image with gradient overlay in the upper field
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(if (isWideLayout) 750.dp else 1120.dp)
+        ) {
+            Image(
+                painter = painterResource(id = R.drawable.img_tech_background_1782321423534),
+                contentDescription = "Cybersecurity professional desk banner background",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                if (isDarkMode) Color(0x220F172A) else Color(0x22FFFFFF),
+                                if (isDarkMode) Color(0xAA0F172A) else Color(0xAAFFFFFF),
+                                if (isDarkMode) LightBackground else LightBackground
+                            )
+                        )
+                    )
+            )
+        }
+
         // Ambient background circuit aesthetics
         Column(
             modifier = Modifier
-                .fillMaxWidth()
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
                 .drawBehind {
                     // Modern grid mesh of dots for high fidelity enterprise feel
                     val rows = 40
@@ -297,7 +420,7 @@ fun LandingPageScreen(modifier: Modifier = Modifier) {
                     for (r in 0..rows) {
                         for (c in 0..cols) {
                             drawCircle(
-                                color = Color(0x060A3E72),
+                                color = if (isDarkMode) Color(0x0A94A3B8) else Color(0x060A3E72),
                                 radius = 2.dp.toPx(),
                                 center = Offset(c * gapX, r * gapY)
                             )
@@ -307,7 +430,11 @@ fun LandingPageScreen(modifier: Modifier = Modifier) {
         ) {
             // Enterprise Global Corporate Top Brand Bar
             CorporateHeroNavigationBar(
-                onRequestAccessClicked = { showRequestAccessDialog = true }
+                systemLanguage = systemLanguage,
+                onLanguageChange = { systemLanguage = it },
+                onRequestAccessClicked = { showRequestAccessDialog = true },
+                isDarkMode = isDarkMode,
+                onThemeToggle = onThemeToggle
             )
 
             // Split screen or compact layout container
@@ -328,7 +455,10 @@ fun LandingPageScreen(modifier: Modifier = Modifier) {
                         verticalArrangement = Arrangement.Center
                     ) {
                         HeroPromoBenefitBlock(
-                            onRequestClicked = { showRequestAccessDialog = true }
+                            onRequestClicked = { showRequestAccessDialog = true },
+                            onDownloadClicked = onDownloadAppClick,
+                            isDownloading = isDownloadingApp,
+                            downloadProgress = downloadProgress
                         )
                     }
 
@@ -364,7 +494,20 @@ fun LandingPageScreen(modifier: Modifier = Modifier) {
                             selectedTicketId = selectedTicketId,
                             onSelectedTicketChange = { selectedTicketId = it },
                             simulatorViewMode = simulatorViewMode,
-                            onSimulatorViewModeChange = { simulatorViewMode = it }
+                            onSimulatorViewModeChange = { simulatorViewMode = it },
+                            onAddTicket = onAddTicket
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        RecentTicketsSection(
+                            recentTickets = recentSubmittedTicketsState,
+                            onTicketClick = { clickedTicket ->
+                                if (!activeTicketsState.any { it.id == clickedTicket.id }) {
+                                    activeTicketsState = listOf(clickedTicket) + activeTicketsState
+                                }
+                                selectedTicketId = clickedTicket.id
+                                simulatorViewMode = "details"
+                            },
+                            isDarkMode = isDarkMode
                         )
                     }
                 }
@@ -377,7 +520,11 @@ fun LandingPageScreen(modifier: Modifier = Modifier) {
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     // Header promo still at top
-                    HeroHeaderCompactText()
+                    HeroHeaderCompactText(
+                        onDownloadClicked = onDownloadAppClick,
+                        isDownloading = isDownloadingApp,
+                        downloadProgress = downloadProgress
+                    )
 
                     Spacer(modifier = Modifier.height(16.dp))
 
@@ -398,7 +545,7 @@ fun LandingPageScreen(modifier: Modifier = Modifier) {
                                     addSyncLog("✓ [RESOLVE] Dispatched $selectedTicketId resolved. Sync successful.")
                                 }
                             } else {
-                                addSyncLog("↩ [REOPEN] Reopened ServiceNow $selectedTicketId.")
+                                    addSyncLog("↩ [REOPEN] Reopened ServiceNow $selectedTicketId.")
                             }
                         },
                         offlineModeEnabled = offlineModeEnabled,
@@ -407,7 +554,20 @@ fun LandingPageScreen(modifier: Modifier = Modifier) {
                         selectedTicketId = selectedTicketId,
                         onSelectedTicketChange = { selectedTicketId = it },
                         simulatorViewMode = simulatorViewMode,
-                        onSimulatorViewModeChange = { simulatorViewMode = it }
+                        onSimulatorViewModeChange = { simulatorViewMode = it },
+                        onAddTicket = onAddTicket
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    RecentTicketsSection(
+                        recentTickets = recentSubmittedTicketsState,
+                        onTicketClick = { clickedTicket ->
+                            if (!activeTicketsState.any { it.id == clickedTicket.id }) {
+                                activeTicketsState = listOf(clickedTicket) + activeTicketsState
+                            }
+                            selectedTicketId = clickedTicket.id
+                            simulatorViewMode = "details"
+                        },
+                        isDarkMode = isDarkMode
                     )
 
                     Spacer(modifier = Modifier.height(24.dp))
@@ -464,7 +624,7 @@ fun LandingPageScreen(modifier: Modifier = Modifier) {
             )
 
             // Trust Footer
-            UnisysEnterpriseFooter()
+            DGrahamEnterpriseFooter()
         }
 
         // High-Conversion Invitation Dialog
@@ -491,9 +651,40 @@ fun LandingPageScreen(modifier: Modifier = Modifier) {
 // Top navigation banner with enterprise branding and clean CTA
 @Composable
 fun CorporateHeroNavigationBar(
+    systemLanguage: String,
+    onLanguageChange: (String) -> Unit,
     onRequestAccessClicked: () -> Unit,
+    isDarkMode: Boolean,
+    onThemeToggle: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val theme = getThemeColors(isDarkMode)
+    val CleanWhite = theme.CleanWhite
+    val SlateNavy = theme.SlateNavy
+    val SlateSubtle = theme.SlateSubtle
+    val BorderSlate = theme.BorderSlate
+    val LightBackground = theme.LightBackground
+    val UnisysBlue = theme.UnisysBlue
+    val AccentTechBlue = theme.AccentTechBlue
+
+    val navSubTitleText = when(systemLanguage) {
+        "ES" -> "Portal de Operaciones de Campo"
+        "FR" -> "Portail des Opérations de Terrain"
+        else -> "Field Operations Portal"
+    }
+
+    val fipsLabelText = when(systemLanguage) {
+        "ES" -> "SEGURO FIPS 140-2"
+        "FR" -> "SÉCURISÉ FIPS 140-2"
+        else -> "FIPS 140-2 SECURE"
+    }
+
+    val navButtonText = when(systemLanguage) {
+        "ES" -> "Solicitar Acceso"
+        "FR" -> "Demander l'Accès"
+        else -> "Request Access"
+    }
+
     Card(
         modifier = modifier
             .fillMaxWidth()
@@ -513,7 +704,7 @@ fun CorporateHeroNavigationBar(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // Large styled corporate "U" logo
+                // Large styled corporate "D" logo
                 Box(
                     modifier = Modifier
                         .size(36.dp)
@@ -526,7 +717,7 @@ fun CorporateHeroNavigationBar(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "U",
+                        text = "D",
                         color = CleanWhite,
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Black,
@@ -536,14 +727,14 @@ fun CorporateHeroNavigationBar(
                 
                 Column {
                     Text(
-                        text = "UNISYS",
+                        text = "D GRAHAM",
                         color = SlateNavy,
                         fontWeight = FontWeight.Bold,
                         fontSize = 15.sp,
                         letterSpacing = 1.sp
                     )
                     Text(
-                        text = "Field Operations Portal",
+                        text = navSubTitleText,
                         color = SlateSubtle,
                         fontWeight = FontWeight.Medium,
                         fontSize = 10.sp
@@ -555,9 +746,84 @@ fun CorporateHeroNavigationBar(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                // Highly Accessible Dynamic Segmented Language Switcher Component
+                Row(
+                    modifier = Modifier
+                        .background(if (isDarkMode) Color(0xFF334155) else Color(0xFFF1F5F9), RoundedCornerShape(8.dp))
+                        .padding(2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val languages = listOf(
+                        "EN" to "🇺🇸 EN",
+                        "ES" to "🇪🇸 ES",
+                        "FR" to "🇫🇷 FR"
+                    )
+                    languages.forEach { (langCode, langLabel) ->
+                        val isSelected = systemLanguage == langCode
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(if (isSelected) UnisysBlue else Color.Transparent)
+                                .clickable { onLanguageChange(langCode) }
+                                .padding(horizontal = 8.dp, vertical = 6.dp)
+                                .testTag("lang_switch_$langCode")
+                        ) {
+                            Text(
+                                text = langLabel,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isSelected) CleanWhite else SlateSubtle
+                            )
+                        }
+                    }
+                }
+
+                // Highly Accessible Theme Switcher Segmented Control
+                Row(
+                    modifier = Modifier
+                        .background(if (isDarkMode) Color(0xFF334155) else Color(0xFFF1F5F9), RoundedCornerShape(8.dp))
+                        .padding(2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Light mode option
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (!isDarkMode) UnisysBlue else Color.Transparent)
+                            .clickable { if (isDarkMode) onThemeToggle() }
+                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                            .testTag("theme_switch_light")
+                    ) {
+                        Text(
+                            text = "☀️ LIGHT",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (!isDarkMode) CleanWhite else SlateSubtle
+                        )
+                    }
+                    // Dark mode option
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(if (isDarkMode) UnisysBlue else Color.Transparent)
+                            .clickable { if (!isDarkMode) onThemeToggle() }
+                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                            .testTag("theme_switch_dark")
+                    ) {
+                        Text(
+                            text = "🌙 DARK",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isDarkMode) CleanWhite else SlateSubtle
+                        )
+                    }
+                }
+
                 // Trusted security seal badge - Desktop visible
                 Surface(
-                    color = Color(0xFFF1F5F9),
+                    color = if (isDarkMode) Color(0xFF334155) else Color(0xFFF1F5F9),
                     shape = RoundedCornerShape(6.dp),
                     modifier = Modifier.padding(end = 4.dp)
                 ) {
@@ -573,7 +839,7 @@ fun CorporateHeroNavigationBar(
                             modifier = Modifier.size(11.dp)
                         )
                         Text(
-                            text = "FIPS 140-2 SECURE",
+                            text = fipsLabelText,
                             fontSize = 8.sp,
                             fontWeight = FontWeight.Bold,
                             color = UnisysBlue
@@ -596,7 +862,7 @@ fun CorporateHeroNavigationBar(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "Request Access",
+                        text = navButtonText,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -610,8 +876,21 @@ fun CorporateHeroNavigationBar(
 @Composable
 fun HeroPromoBenefitBlock(
     onRequestClicked: () -> Unit,
+    onDownloadClicked: () -> Unit,
+    isDownloading: Boolean,
+    downloadProgress: Float,
     modifier: Modifier = Modifier
 ) {
+    val isDark = LocalThemeDark.current
+    val theme = getThemeColors(isDark)
+    val CleanWhite = theme.CleanWhite
+    val SlateNavy = theme.SlateNavy
+    val SlateSubtle = theme.SlateSubtle
+    val BorderSlate = theme.BorderSlate
+    val LightBackground = theme.LightBackground
+    val UnisysBlue = theme.UnisysBlue
+    val AccentTechBlue = theme.AccentTechBlue
+
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -642,10 +921,10 @@ fun HeroPromoBenefitBlock(
         }
 
         Text(
-            text = "Secure, Field-Ready\nIncident Management.",
+            text = "Field Tech Hub",
             style = TextStyle(
-                fontSize = 38.sp,
-                lineHeight = 46.sp,
+                fontSize = 42.sp,
+                lineHeight = 50.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = SlateNavy,
                 letterSpacing = (-1).sp
@@ -653,7 +932,15 @@ fun HeroPromoBenefitBlock(
         )
 
         Text(
-            text = "Specially engineered for Unisys technicians deployed in rugged, mission-critical regions. Gain real-time ServiceNow diagnostic access with absolute FIPS compliance, offline cryptographic sync logic, and secure credentials authentication.",
+            text = "Interactive D Graham Mobile App Simulator",
+            color = AccentTechBlue,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.5.sp
+        )
+
+        Text(
+            text = "Specially engineered for D Graham field operations. Interact with the high-fidelity mobile app simulator on the right to test status changes, view customer contacts, and run offline cache sync tests. Access the secure request form below to submit security credential proposals.",
             fontSize = 15.sp,
             lineHeight = 23.sp,
             color = SlateSubtle,
@@ -667,16 +954,16 @@ fun HeroPromoBenefitBlock(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             BenefitBulletPoint(
-                title = "ServiceNow Instant Mirroring",
-                desc = "Synchronize hardware diagnostic lists with latency-free REST tunnels."
+                title = "Interactive Mobile App Simulator",
+                desc = "Test live state transitions, review internal technician notes, and inspect precise event timestamps."
             )
             BenefitBulletPoint(
-                title = "Offline Isolated Sandbox Ledger",
-                desc = "Log critical client repair signs without signal. Local queue flushes dynamically upon reconnecting."
+                title = "Secure Access Request Form",
+                desc = "Submit supervisor badges and regional credentials via a military-grade secure portal."
             )
             BenefitBulletPoint(
-                title = "Hardware Cryptography Guard",
-                desc = "Protected with client AES-GCM-256 local storage encryption and FIPS VPN tunnel integrity."
+                title = "FIPS Offline Vault Sync",
+                desc = "Log critical incident updates even during network drop simulations. Sync local cache queues automatically."
             )
         }
 
@@ -695,7 +982,7 @@ fun HeroPromoBenefitBlock(
                 modifier = Modifier.testTag("hero_request_access_btn")
             ) {
                 Text(
-                    text = "Request Accredited Access",
+                    text = "Open Secure Request Form",
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Bold
                 )
@@ -707,13 +994,66 @@ fun HeroPromoBenefitBlock(
                     modifier = Modifier.size(16.dp)
                 )
             }
+
+            OutlinedButton(
+                onClick = onDownloadClicked,
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = UnisysBlue),
+                border = BorderStroke(1.5.dp, UnisysBlue),
+                contentPadding = PaddingValues(horizontal = 24.dp, vertical = 16.dp),
+                shape = RoundedCornerShape(10.dp),
+                enabled = !isDownloading,
+                modifier = Modifier.testTag("hero_download_app_btn")
+            ) {
+                if (isDownloading) {
+                    CircularProgressIndicator(
+                        progress = downloadProgress,
+                        modifier = Modifier.size(16.dp),
+                        color = UnisysBlue,
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Downloading (${(downloadProgress * 100).toInt()}%)",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.ArrowDropDown,
+                        contentDescription = "Download app icon",
+                        tint = UnisysBlue,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Download App",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
         }
     }
 }
 
 // Compact version of top promotional copy for smaller screens
 @Composable
-fun HeroHeaderCompactText(modifier: Modifier = Modifier) {
+fun HeroHeaderCompactText(
+    onDownloadClicked: () -> Unit,
+    isDownloading: Boolean,
+    downloadProgress: Float,
+    modifier: Modifier = Modifier
+) {
+    val isDark = LocalThemeDark.current
+    val theme = getThemeColors(isDark)
+    val CleanWhite = theme.CleanWhite
+    val SlateNavy = theme.SlateNavy
+    val SlateSubtle = theme.SlateSubtle
+    val BorderSlate = theme.BorderSlate
+    val LightBackground = theme.LightBackground
+    val UnisysBlue = theme.UnisysBlue
+    val AccentTechBlue = theme.AccentTechBlue
+
     Column(
         modifier = modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -745,22 +1085,68 @@ fun HeroHeaderCompactText(modifier: Modifier = Modifier) {
         }
 
         Text(
-            text = "Secure, Field-Ready\nIncident Management.",
-            fontSize = 28.sp,
-            lineHeight = 34.sp,
+            text = "Field Tech Hub",
+            fontSize = 32.sp,
+            lineHeight = 38.sp,
             fontWeight = FontWeight.ExtraBold,
             color = SlateNavy,
             textAlign = TextAlign.Center
         )
 
         Text(
-            text = "Rugged field-ready incident client for Unisys Service personnel, mirroring live ServiceNow APIs directly from high-security zones.",
+            text = "D Graham Mobile App Simulator",
+            color = AccentTechBlue,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center
+        )
+
+        Text(
+            text = "Interact with the high-fidelity D Graham simulator below to test live status resolutions, view technician details, and run offline cache sync trials. Use the secure form to submit authorization requests.",
             fontSize = 13.sp,
             lineHeight = 19.sp,
             color = SlateSubtle,
             textAlign = TextAlign.Center,
             modifier = Modifier.padding(horizontal = 12.dp)
         )
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        Button(
+            onClick = onDownloadClicked,
+            colors = ButtonDefaults.buttonColors(containerColor = UnisysBlue),
+            shape = RoundedCornerShape(8.dp),
+            enabled = !isDownloading,
+            modifier = Modifier.testTag("compact_download_app_btn")
+        ) {
+            if (isDownloading) {
+                CircularProgressIndicator(
+                    progress = downloadProgress,
+                    modifier = Modifier.size(16.dp),
+                    color = CleanWhite,
+                    strokeWidth = 2.dp
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Downloading (${(downloadProgress * 100).toInt()}%)",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Default.ArrowDropDown,
+                    contentDescription = "Download app icon",
+                    tint = CleanWhite,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Download Android App",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
     }
 }
 
@@ -770,6 +1156,16 @@ fun RequestAccessFloatingTriggerCard(
     onRequestClicked: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val isDark = LocalThemeDark.current
+    val theme = getThemeColors(isDark)
+    val CleanWhite = theme.CleanWhite
+    val SlateNavy = theme.SlateNavy
+    val SlateSubtle = theme.SlateSubtle
+    val BorderSlate = theme.BorderSlate
+    val LightBackground = theme.LightBackground
+    val UnisysBlue = theme.UnisysBlue
+    val AccentTechBlue = theme.AccentTechBlue
+
     Card(
         modifier = modifier
             .fillMaxWidth()
@@ -782,14 +1178,14 @@ fun RequestAccessFloatingTriggerCard(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Text(
-                text = "Deploy the Unified Mobile Node Today",
+                text = "Register with Field Tech Hub",
                 color = CleanWhite,
                 fontWeight = FontWeight.Bold,
                 fontSize = 16.sp,
                 textAlign = TextAlign.Center
             )
             Text(
-                text = "Comply with global field service guidelines and establish accredited FIPS authentication.",
+                text = "Submit our secure request form to register your technician hardware key and run the live simulator in secure mode.",
                 color = Color(0xFF90CDF4),
                 fontSize = 12.sp,
                 textAlign = TextAlign.Center
@@ -803,7 +1199,7 @@ fun RequestAccessFloatingTriggerCard(
                     .testTag("compact_cta_button")
             ) {
                 Text(
-                    text = "Request Gateway Credentials",
+                    text = "Open Secure Request Form",
                     fontWeight = FontWeight.Bold,
                     fontSize = 13.sp
                 )
@@ -865,8 +1261,19 @@ fun SmartphoneSimulatorContainer(
     onSelectedTicketChange: (String) -> Unit,
     simulatorViewMode: String,
     onSimulatorViewModeChange: (String) -> Unit,
+    onAddTicket: (String, String, String, String, String, String, String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val isDark = LocalThemeDark.current
+    val theme = getThemeColors(isDark)
+    val CleanWhite = theme.CleanWhite
+    val SlateNavy = theme.SlateNavy
+    val SlateSubtle = theme.SlateSubtle
+    val BorderSlate = theme.BorderSlate
+    val LightBackground = theme.LightBackground
+    val UnisysBlue = theme.UnisysBlue
+    val AccentTechBlue = theme.AccentTechBlue
+
     // Smartphone Outer Bezel
     Box(
         modifier = modifier
@@ -907,7 +1314,7 @@ fun SmartphoneSimulatorContainer(
                                 .background(if (offlineModeEnabled) Color.Red else ServiceGreen, CircleShape)
                         )
                         Text(
-                            text = if (offlineModeEnabled) "Isolated Cache" else "Unisys Secure",
+                            text = if (offlineModeEnabled) "Isolated Cache" else "D Graham Secure",
                             color = Color(0xFF94A3B8),
                             fontSize = 9.sp,
                             fontWeight = FontWeight.Bold
@@ -984,7 +1391,8 @@ fun SmartphoneSimulatorContainer(
                     selectedTicketId = selectedTicketId,
                     onSelectedTicketChange = onSelectedTicketChange,
                     simulatorViewMode = simulatorViewMode,
-                    onSimulatorViewModeChange = onSimulatorViewModeChange
+                    onSimulatorViewModeChange = onSimulatorViewModeChange,
+                    onAddTicket = onAddTicket
                 )
             }
         }
@@ -1015,14 +1423,143 @@ fun AppSimulatorInnerScreen(
     onSelectedTicketChange: (String) -> Unit,
     simulatorViewMode: String,
     onSimulatorViewModeChange: (String) -> Unit,
+    onAddTicket: (String, String, String, String, String, String, String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val isDark = LocalThemeDark.current
+    val theme = getThemeColors(isDark)
+    val CleanWhite = theme.CleanWhite
+    val SlateNavy = theme.SlateNavy
+    val SlateSubtle = theme.SlateSubtle
+    val BorderSlate = theme.BorderSlate
+    val LightBackground = theme.LightBackground
+    val UnisysBlue = theme.UnisysBlue
+    val AccentTechBlue = theme.AccentTechBlue
+
     val currentTexts = localizedStrings[languageSelected] ?: localizedStrings["EN"]!!
     var isDropDownExpanded by remember { mutableStateOf(false) }
     var showInnerResolutionModal by remember { mutableStateOf(false) }
     var resolutionNotesDraft by remember { mutableStateOf("") }
     var selectedResolutionCode by remember { mutableStateOf("Permanent Wire Repair Completed") }
     var selectedGranularTicketId by remember { mutableStateOf<String?>(null) }
+
+    // States for creating/filing a new ticket
+    var showCreateTicketDialog by remember { mutableStateOf(false) }
+    var createTechId by remember { mutableStateOf("") }
+    var createIssueType by remember { mutableStateOf("") }
+    var createTitle by remember { mutableStateOf("") }
+    var createSiteNode by remember { mutableStateOf("D Graham Node #4592") }
+    var createContact by remember { mutableStateOf("Dee Nice - +1 (555) 012-1430") }
+    var createNotes by remember { mutableStateOf("") }
+
+    // Validation error states
+    var createTechIdError by remember { mutableStateOf<String?>(null) }
+    var createIssueTypeError by remember { mutableStateOf<String?>(null) }
+
+    // Speech Recognition States
+    var isListeningState by remember { mutableStateOf(false) }
+    var speechPartialTextState by remember { mutableStateOf("") }
+    var speechRmsState by remember { mutableStateOf(0f) }
+    var showDictationOverlayState by remember { mutableStateOf(false) }
+    var speechErrorState by remember { mutableStateOf<String?>(null) }
+
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    
+    val micPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+        onResult = { isGranted ->
+            if (isGranted) {
+                showDictationOverlayState = true
+                isListeningState = true
+                speechPartialTextState = ""
+                speechErrorState = null
+            } else {
+                Toast.makeText(context, "Microphone permission is required for voice dictation", Toast.LENGTH_LONG).show()
+            }
+        }
+    )
+
+    DisposableEffect(isListeningState) {
+        var speechRecognizer: SpeechRecognizer? = null
+        if (isListeningState) {
+            try {
+                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                    putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US")
+                }
+                
+                speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
+                    setRecognitionListener(object : RecognitionListener {
+                        override fun onReadyForSpeech(params: Bundle?) {
+                            speechErrorState = null
+                        }
+                        override fun onBeginningOfSpeech() {}
+                        override fun onRmsChanged(rmsdB: Float) {
+                            speechRmsState = rmsdB
+                        }
+                        override fun onBufferReceived(buffer: ByteArray?) {}
+                        override fun onEndOfSpeech() {}
+                        override fun onError(error: Int) {
+                            val msg = when (error) {
+                                SpeechRecognizer.ERROR_AUDIO -> "Audio recording error"
+                                SpeechRecognizer.ERROR_CLIENT -> "Client-side error"
+                                SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Insufficient permissions"
+                                SpeechRecognizer.ERROR_NETWORK -> "Network error"
+                                SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Network timeout"
+                                SpeechRecognizer.ERROR_NO_MATCH -> "No speech recognized"
+                                SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Service busy"
+                                SpeechRecognizer.ERROR_SERVER -> "Server error"
+                                SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Speech timeout"
+                                else -> "Recognition failed ($error)"
+                            }
+                            speechErrorState = msg
+                        }
+                        override fun onResults(results: Bundle?) {
+                            val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                            if (!matches.isNullOrEmpty()) {
+                                createIssueType = matches[0]
+                                createIssueTypeError = null
+                                isListeningState = false
+                                showDictationOverlayState = false
+                            }
+                        }
+                        override fun onPartialResults(partialResults: Bundle?) {
+                            val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                            if (!matches.isNullOrEmpty()) {
+                                speechPartialTextState = matches[0]
+                            }
+                        }
+                        override fun onEvent(eventType: Int, params: Bundle?) {}
+                    })
+                    startListening(intent)
+                }
+            } catch (e: Exception) {
+                speechErrorState = "Speech recognition service not available"
+            }
+        }
+        
+        onDispose {
+            try {
+                speechRecognizer?.stopListening()
+                speechRecognizer?.destroy()
+            } catch (e: Exception) {
+                // ignore
+            }
+        }
+    }
+
+    // Success Toast States
+    var showToast by remember { mutableStateOf(false) }
+    var toastText by remember { mutableStateOf("") }
+
+    LaunchedEffect(showToast) {
+        if (showToast) {
+            kotlinx.coroutines.delay(3500)
+            showToast = false
+        }
+    }
 
     val selectedTicket = activeTickets.find { it.id == selectedTicketId } ?: activeTickets[0]
     
@@ -1050,12 +1587,15 @@ fun AppSimulatorInnerScreen(
         else -> if (languageSelected == "ES") "Se detectó temperatura alta en el devanado del compresor durante carga máxima continua." else if (languageSelected == "FR") "Température élevée de l'enroulement du compresseur détectée pendant une charge de pointe continue." else "High compressor winding temperature detected during continuous peak load."
     }
 
-    Column(
+    Box(
         modifier = modifier
             .fillMaxSize()
             .background(Color(0xFFF8FAFC))
     ) {
-        // App Custom Private Header
+        Column(
+            modifier = Modifier.fillMaxSize()
+        ) {
+            // App Custom Private Header
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1248,6 +1788,43 @@ fun AppSimulatorInnerScreen(
                         }
                     }
 
+                    // File Incident action trigger
+                    Button(
+                        onClick = {
+                            showCreateTicketDialog = true
+                            createTechId = ""
+                            createIssueType = ""
+                            createTitle = ""
+                            createNotes = ""
+                            createTechIdError = null
+                            createIssueTypeError = null
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = UnisysBlue),
+                        shape = RoundedCornerShape(6.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(30.dp)
+                            .testTag("simulator_file_incident_btn"),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = "Add incident icon",
+                                tint = CleanWhite,
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Text(
+                                text = if (languageSelected == "ES") "Registrar Incidencia" else if (languageSelected == "FR") "Signaler un Incident" else "File Incident",
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
                     // Card items in activeTickets
                     activeTickets.forEach { ticket ->
                         Card(
@@ -1434,49 +2011,57 @@ fun AppSimulatorInnerScreen(
 
                             Divider(color = BorderSlate)
 
-                            // Meta details
-                            Row(modifier = Modifier.fillMaxWidth()) {
-                                Column(modifier = Modifier.weight(1.1f)) {
-                                    Text(text = currentTexts.categoryLabel.uppercase(), color = SlateSubtle, fontSize = 7.sp, fontWeight = FontWeight.Bold)
-                                    Text(text = ticketCategory, color = SlateNavy, fontSize = 9.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                }
-                                Column(modifier = Modifier.weight(0.9f)) {
-                                    Text(text = currentTexts.siteLabel.uppercase(), color = SlateSubtle, fontSize = 7.sp, fontWeight = FontWeight.Bold)
-                                    Text(text = selectedTicket.site, color = SlateNavy, fontSize = 9.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                }
-                            }
-
-                            // Localized dynamic status row
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(Color(0xFFF8FAFC), RoundedCornerShape(4.dp))
-                                    .padding(6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
+                            // Meta details Grid (Issue Type, Technician ID, Site Node, Status)
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Text(
-                                    text = currentTexts.statusLabel,
-                                    color = SlateSubtle,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 9.sp
-                                )
-                                
-                                // Status colored pill
-                                Box(
-                                    modifier = Modifier
-                                        .background(
-                                            if (ticketStatus == "In Progress") BadgeBgOrange else BadgeBgGreen,
-                                            RoundedCornerShape(4.dp)
-                                        )
-                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                // Row 1: Issue Type & Technician ID
+                                Row(modifier = Modifier.fillMaxWidth()) {
+                                    Column(modifier = Modifier.weight(1.1f)) {
+                                        Text(text = currentTexts.categoryLabel.uppercase(), color = SlateSubtle, fontSize = 7.sp, fontWeight = FontWeight.Bold)
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(text = ticketCategory, color = SlateNavy, fontSize = 9.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                    Column(modifier = Modifier.weight(0.9f)) {
+                                        Text(text = currentTexts.techIdLabel.uppercase(), color = SlateSubtle, fontSize = 7.sp, fontWeight = FontWeight.Bold)
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(text = "TECH-DG-${selectedTicketId.takeLast(4)}", color = SlateNavy, fontSize = 9.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                }
+
+                                Divider(color = Color(0xFFF1F5F9))
+
+                                // Row 2: Site Node & Status Pill
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text(
-                                        text = if (ticketStatus == "In Progress") currentTexts.statusInProgress.uppercase() else currentTexts.statusResolved.uppercase(),
-                                        color = if (ticketStatus == "In Progress") ServiceOrange else ServiceGreen,
-                                        fontSize = 8.sp,
-                                        fontWeight = FontWeight.Black
-                                    )
+                                    Column(modifier = Modifier.weight(1.1f)) {
+                                        Text(text = currentTexts.siteLabel.uppercase(), color = SlateSubtle, fontSize = 7.sp, fontWeight = FontWeight.Bold)
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(text = selectedTicket.site, color = SlateNavy, fontSize = 9.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                    Column(modifier = Modifier.weight(0.9f)) {
+                                        Text(text = currentTexts.statusLabel.uppercase(), color = SlateSubtle, fontSize = 7.sp, fontWeight = FontWeight.Bold)
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        // Status colored pill
+                                        Box(
+                                            modifier = Modifier
+                                                .background(
+                                                    if (ticketStatus == "In Progress") BadgeBgOrange else BadgeBgGreen,
+                                                    RoundedCornerShape(4.dp)
+                                                )
+                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        ) {
+                                            Text(
+                                                text = if (ticketStatus == "In Progress") currentTexts.statusInProgress.uppercase() else currentTexts.statusResolved.uppercase(),
+                                                color = if (ticketStatus == "In Progress") ServiceOrange else ServiceGreen,
+                                                fontSize = 8.sp,
+                                                fontWeight = FontWeight.Black
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1610,6 +2195,452 @@ fun AppSimulatorInnerScreen(
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
                             )
+                        }
+                    }
+                }
+            }
+
+            // Real simulated create ticket/incident dialogue overlay directly within the phone simulation
+            if (showCreateTicketDialog) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0x990F172A))
+                        .padding(12.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .shadow(8.dp),
+                        colors = CardDefaults.cardColors(containerColor = CleanWhite),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = if (languageSelected == "ES") "Ficha de Registro de Incidencia" else if (languageSelected == "FR") "Créer un Dossier d'Incident" else "File Incident Proposal",
+                                color = SlateNavy,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp
+                            )
+
+                            // Technician ID field (Mandatory)
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(
+                                    text = "${if (languageSelected == "ES") "ID del Técnico" else if (languageSelected == "FR") "ID du Technicien" else "Technician ID"} *",
+                                    color = SlateNavy,
+                                    fontSize = 8.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                OutlinedTextField(
+                                    value = createTechId,
+                                    onValueChange = {
+                                        createTechId = it
+                                        createTechIdError = null
+                                    },
+                                    placeholder = { Text("e.g. TECH-DG-1234", fontSize = 9.sp) },
+                                    textStyle = TextStyle(fontSize = 10.sp),
+                                    singleLine = true,
+                                    isError = createTechIdError != null,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(48.dp)
+                                        .testTag("form_tech_id_input"),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = UnisysBlue,
+                                        unfocusedBorderColor = BorderSlate,
+                                        errorBorderColor = TicketP1Red
+                                    )
+                                )
+                                if (createTechIdError != null) {
+                                    Text(
+                                        text = createTechIdError!!,
+                                        color = TicketP1Red,
+                                        fontSize = 8.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.testTag("error_tech_id_empty")
+                                    )
+                                }
+                            }
+
+                            // Issue Type field (Mandatory)
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(
+                                    text = "${if (languageSelected == "ES") "Tipo de Incidencia" else if (languageSelected == "FR") "Type d'Incident" else "Issue Type / Category"} *",
+                                    color = SlateNavy,
+                                    fontSize = 8.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                OutlinedTextField(
+                                    value = createIssueType,
+                                    onValueChange = {
+                                        createIssueType = it
+                                        createIssueTypeError = null
+                                    },
+                                    placeholder = { Text("e.g. Hardware Provisioning", fontSize = 9.sp) },
+                                    textStyle = TextStyle(fontSize = 10.sp),
+                                    singleLine = true,
+                                    isError = createIssueTypeError != null,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(48.dp)
+                                        .testTag("form_issue_type_input"),
+                                    trailingIcon = {
+                                        IconButton(
+                                            onClick = {
+                                                val permissionCheck = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
+                                                if (permissionCheck == PackageManager.PERMISSION_GRANTED) {
+                                                    isListeningState = true
+                                                    speechPartialTextState = ""
+                                                    speechErrorState = null
+                                                    showDictationOverlayState = true
+                                                } else {
+                                                    micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                                }
+                                            },
+                                            modifier = Modifier.size(32.dp).testTag("voice_dictation_mic_button")
+                                        ) {
+                                            MicIcon(
+                                                tint = if (isListeningState) TicketP1Red else UnisysBlue,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    },
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = UnisysBlue,
+                                        unfocusedBorderColor = BorderSlate,
+                                        errorBorderColor = TicketP1Red
+                                    )
+                                )
+                                if (createIssueTypeError != null) {
+                                    Text(
+                                        text = createIssueTypeError!!,
+                                        color = TicketP1Red,
+                                        fontSize = 8.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.testTag("error_issue_type_empty")
+                                    )
+                                }
+                            }
+
+
+
+                            // Action buttons
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                TextButton(
+                                    onClick = { showCreateTicketDialog = false }
+                                ) {
+                                    Text(text = currentTexts.cancelLabel, fontSize = 9.sp, color = SlateSubtle)
+                                }
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Button(
+                                    onClick = {
+                                        println("DEBUG_TEST: onClick triggered!")
+                                        var hasError = false
+                                        if (createTechId.trim().isEmpty()) {
+                                            createTechIdError = "Technician ID is required"
+                                            hasError = true
+                                        }
+                                        if (createIssueType.trim().isEmpty()) {
+                                            createIssueTypeError = "Issue Type is required"
+                                            hasError = true
+                                        }
+                                        if (!hasError) {
+                                            val techIdPill = createTechId.trim()
+                                            onAddTicket(
+                                                createTitle.ifBlank { "Unscheduled Maintenance Node Check" },
+                                                createIssueType,
+                                                "P2 - High",
+                                                createTechId,
+                                                createSiteNode,
+                                                createNotes.ifBlank { "Dispatched by client diagnostic proposal." },
+                                                createContact
+                                            )
+                                            toastText = when (languageSelected) {
+                                                "ES" -> "✓ ¡Incidencia registrada con éxito para el técnico $techIdPill!"
+                                                "FR" -> "✓ Incident créé avec succès pour le technicien $techIdPill !"
+                                                else -> "✓ Ticket filed successfully for Tech ID $techIdPill!"
+                                            }
+                                            showToast = true
+                                            showCreateTicketDialog = false
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = UnisysBlue),
+                                    shape = RoundedCornerShape(6.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                    modifier = Modifier.testTag("submit_create_ticket_btn")
+                                ) {
+                                    Text(
+                                        text = if (languageSelected == "ES") "Registrar" else if (languageSelected == "FR") "Soumettre" else "Submit Proposal",
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Voice Dictation overlay directly within the phone simulation
+            if (showDictationOverlayState) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0xE00F172A)) // dark translucent overlay
+                        .padding(12.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .shadow(12.dp)
+                            .testTag("dictation_overlay_card"),
+                        colors = CardDefaults.cardColors(containerColor = CleanWhite),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            // Header
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    MicIcon(tint = if (isListeningState) TicketP1Red else SlateSubtle, modifier = Modifier.size(18.dp))
+                                    Text(
+                                        text = if (isListeningState) "Dictating category..." else "Voice Dictation",
+                                        color = SlateNavy,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                
+                                // Close button
+                                IconButton(
+                                    onClick = {
+                                        isListeningState = false
+                                        showDictationOverlayState = false
+                                    },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "Close",
+                                        tint = SlateSubtle,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+
+                            // Pulsing wave simulation
+                            val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+                            val pulseScale by infiniteTransition.animateFloat(
+                                initialValue = 1.0f,
+                                targetValue = 1.4f,
+                                animationSpec = infiniteRepeatable(
+                                    animation = tween(1000, easing = LinearEasing),
+                                    repeatMode = RepeatMode.Reverse
+                                ),
+                                label = "pulseScale"
+                            )
+                            
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier.size(80.dp)
+                            ) {
+                                // Pulsing waves
+                                Box(
+                                    modifier = Modifier
+                                        .size(50.dp)
+                                        .scale(if (isListeningState) pulseScale + (speechRmsState / 15f).coerceIn(0f, 0.5f) else 1.0f)
+                                        .background(
+                                            color = if (isListeningState) TicketP1Red.copy(alpha = 0.2f) else SlateSubtle.copy(alpha = 0.2f),
+                                            shape = CircleShape
+                                        )
+                                )
+                                
+                                // Microphone circle
+                                Box(
+                                    modifier = Modifier
+                                        .size(46.dp)
+                                        .background(
+                                            color = if (isListeningState) TicketP1Red else SlateSubtle,
+                                            shape = CircleShape
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    MicIcon(tint = Color.White, modifier = Modifier.size(22.dp))
+                                }
+                            }
+
+                            // Subtitle/Real-time Transcript text
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)
+                            ) {
+                                Text(
+                                    text = "Transcript Output:",
+                                    fontSize = 8.sp,
+                                    color = SlateSubtle,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Surface(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = 40.dp)
+                                        .border(1.dp, BorderSlate, RoundedCornerShape(8.dp)),
+                                    color = LightBackground,
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier.padding(8.dp),
+                                        contentAlignment = Alignment.CenterStart
+                                    ) {
+                                        Text(
+                                            text = if (speechPartialTextState.isNotEmpty()) speechPartialTextState else if (isListeningState) "Speak category clearly..." else "Ready to dictate.",
+                                            fontSize = 9.sp,
+                                            color = if (speechPartialTextState.isNotEmpty()) SlateNavy else SlateSubtle,
+                                            fontStyle = if (speechPartialTextState.isEmpty()) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Fallback Simulator Panel
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = "Tap a simulated tech phrase to auto-dictate:",
+                                    fontSize = 8.sp,
+                                    color = SlateSubtle,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    val fallbackTemplates = listOf(
+                                        "Hardware Provisioning Failure",
+                                        "Fiber Optic Repair Needed",
+                                        "Database Connection Outage",
+                                        "Network Router Calibration",
+                                        "Field Sensor Maintenance"
+                                    )
+                                    fallbackTemplates.forEach { template ->
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .background(UnisysBlue.copy(alpha = 0.1f))
+                                                .border(1.dp, UnisysBlue.copy(alpha = 0.3f), RoundedCornerShape(6.dp))
+                                                .clickable {
+                                                    coroutineScope.launch {
+                                                        isListeningState = false
+                                                        speechPartialTextState = ""
+                                                        speechErrorState = null
+                                                        
+                                                        var currentString = ""
+                                                        for (char in template) {
+                                                            currentString += char
+                                                            speechPartialTextState = currentString
+                                                            delay(25)
+                                                        }
+                                                        
+                                                        delay(200)
+                                                        createIssueType = template
+                                                        createIssueTypeError = null
+                                                        showDictationOverlayState = false
+                                                    }
+                                                }
+                                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                        ) {
+                                            Text(
+                                                text = template,
+                                                fontSize = 8.sp,
+                                                color = UnisysBlue,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Error indicator
+                            speechErrorState?.let { err ->
+                                Text(
+                                    text = "⚠️ $err",
+                                    color = TicketP1Red,
+                                    fontSize = 8.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+
+                            // Control actions
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = {
+                                        isListeningState = false
+                                        showDictationOverlayState = false
+                                    },
+                                    modifier = Modifier.weight(1f).height(32.dp),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = SlateSubtle),
+                                    border = BorderStroke(1.dp, BorderSlate),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text("Cancel", fontSize = 9.sp)
+                                }
+                                
+                                if (isListeningState) {
+                                    Button(
+                                        onClick = {
+                                            isListeningState = false
+                                        },
+                                        modifier = Modifier.weight(1f).height(32.dp),
+                                        colors = ButtonDefaults.buttonColors(containerColor = TicketP1Red),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Text("Stop", fontSize = 9.sp, color = Color.White)
+                                    }
+                                } else {
+                                    Button(
+                                        onClick = {
+                                            isListeningState = true
+                                            speechPartialTextState = ""
+                                            speechErrorState = null
+                                        },
+                                        modifier = Modifier.weight(1f).height(32.dp),
+                                        colors = ButtonDefaults.buttonColors(containerColor = UnisysBlue),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Text("Listen", fontSize = 9.sp, color = Color.White)
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -1968,6 +2999,46 @@ fun AppSimulatorInnerScreen(
                 )
             }
         }
+        }
+        
+        // Beautiful success notification toast overlay component
+        AnimatedVisibility(
+            visible = showToast,
+            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 60.dp, start = 16.dp, end = 16.dp)
+        ) {
+            Surface(
+                color = Color(0xFF0F172A), // Slate 900
+                shape = RoundedCornerShape(8.dp),
+                shadowElevation = 6.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("success_toast_container")
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.CheckCircle,
+                        contentDescription = "Success tick icon",
+                        tint = ServiceGreen,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = toastText,
+                        color = CleanWhite,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -1985,10 +3056,20 @@ fun FeaturesSectionBelowFold(
     onClearTerminal: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val isDark = LocalThemeDark.current
+    val theme = getThemeColors(isDark)
+    val CleanWhite = theme.CleanWhite
+    val SlateNavy = theme.SlateNavy
+    val SlateSubtle = theme.SlateSubtle
+    val BorderSlate = theme.BorderSlate
+    val LightBackground = theme.LightBackground
+    val UnisysBlue = theme.UnisysBlue
+    val AccentTechBlue = theme.AccentTechBlue
+
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .background(Color(0xFFEEF2F6))
+            .background(if (isDark) Color(0xFF0F172A) else Color(0xFFEEF2F6))
             .padding(horizontal = 24.dp, vertical = 32.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
@@ -2060,7 +3141,7 @@ fun FeaturesSectionBelowFold(
                             fontSize = 15.sp
                         )
                         Text(
-                            text = "Includes client-side database encryption (AES-256), memory scrubbing upon background execution, and automated VPN handshakes to Unisys private proxies.",
+                            text = "Includes client-side database encryption (AES-256), memory scrubbing upon background execution, and automated VPN handshakes to D Graham private proxies.",
                             color = SlateSubtle,
                             fontSize = 12.sp,
                             lineHeight = 16.sp
@@ -2382,6 +3463,16 @@ fun SecureRequestAccessDialog(
     onSubmit: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val isDark = LocalThemeDark.current
+    val theme = getThemeColors(isDark)
+    val CleanWhite = theme.CleanWhite
+    val SlateNavy = theme.SlateNavy
+    val SlateSubtle = theme.SlateSubtle
+    val BorderSlate = theme.BorderSlate
+    val LightBackground = theme.LightBackground
+    val UnisysBlue = theme.UnisysBlue
+    val AccentTechBlue = theme.AccentTechBlue
+
     var errorText by remember { mutableStateOf<String?>(null) }
     var supervisorIdField by remember { mutableStateOf("") }
     var regionalField by remember { mutableStateOf("USA - East Terminals") }
@@ -2485,7 +3576,7 @@ fun SecureRequestAccessDialog(
                     // Corporate Email Address field
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(
-                            text = "Unisys Corporate Email",
+                            text = "D Graham Corporate Email",
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                             color = SlateNavy
@@ -2496,7 +3587,7 @@ fun SecureRequestAccessDialog(
                                 onMailChange(it)
                                 errorText = null
                             },
-                            placeholder = { Text("e.g. tech.name@unisys.com", fontSize = 11.sp) },
+                            placeholder = { Text("e.g. tech.name@dgraham.com", fontSize = 11.sp) },
                             singleLine = true,
                             isError = errorText != null,
                             colors = OutlinedTextFieldDefaults.colors(
@@ -2629,11 +3720,21 @@ fun SecureRequestAccessDialog(
 
 // Enterprise trusted footer layout with legal disclosures
 @Composable
-fun UnisysEnterpriseFooter(modifier: Modifier = Modifier) {
+fun DGrahamEnterpriseFooter(modifier: Modifier = Modifier) {
+    val isDark = LocalThemeDark.current
+    val theme = getThemeColors(isDark)
+    val CleanWhite = theme.CleanWhite
+    val SlateNavy = theme.SlateNavy
+    val SlateSubtle = theme.SlateSubtle
+    val BorderSlate = theme.BorderSlate
+    val LightBackground = theme.LightBackground
+    val UnisysBlue = theme.UnisysBlue
+    val AccentTechBlue = theme.AccentTechBlue
+
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .background(SlateNavy)
+            .background(if (isDark) Color(0xFF090D16) else Color(0xFF0F172A))
             .padding(horizontal = 24.dp, vertical = 32.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -2649,14 +3750,14 @@ fun UnisysEnterpriseFooter(modifier: Modifier = Modifier) {
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = "U",
+                    text = "D",
                     color = CleanWhite,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Black
                 )
             }
             Text(
-                text = "UNISYS SECURE OPERATIONS",
+                text = "D GRAHAM SECURE OPERATIONS",
                 color = CleanWhite,
                 fontWeight = FontWeight.Bold,
                 fontSize = 11.sp,
@@ -2665,7 +3766,7 @@ fun UnisysEnterpriseFooter(modifier: Modifier = Modifier) {
         }
 
         Text(
-            text = "ServiceNow integration client is owned and maintained by Unisys global hardware team dispatches. All server requests are cryptographically parsed and subject to strict federal logging constraints.",
+            text = "ServiceNow integration client is owned and maintained by D Graham global hardware team dispatches. All server requests are cryptographically parsed and subject to strict federal logging constraints.",
             color = SlateSubtle,
             fontSize = 11.sp,
             textAlign = TextAlign.Center,
@@ -2681,7 +3782,7 @@ fun UnisysEnterpriseFooter(modifier: Modifier = Modifier) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "© 2026 Unisys Corp. All rights secured.",
+                text = "© 2026 D Graham Corp. All rights secured.",
                 color = SlateSubtle,
                 fontSize = 10.sp
             )
@@ -2690,6 +3791,373 @@ fun UnisysEnterpriseFooter(modifier: Modifier = Modifier) {
             ) {
                 Text(text = "Security Terms", color = Color(0xFF6366F1), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 Text(text = "System Status", color = ServiceGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+@Composable
+fun MicIcon(tint: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier.size(24.dp)) {
+        val w = size.width
+        val h = size.height
+        
+        // Draw mic body
+        drawRoundRect(
+            color = tint,
+            topLeft = Offset(w * 0.35f, h * 0.2f),
+            size = androidx.compose.ui.geometry.Size(w * 0.3f, h * 0.45f),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * 0.15f, w * 0.15f)
+        )
+        
+        // Draw stand/cradle
+        drawArc(
+            color = tint,
+            startAngle = 0f,
+            sweepAngle = 180f,
+            useCenter = false,
+            topLeft = Offset(w * 0.25f, h * 0.35f),
+            size = androidx.compose.ui.geometry.Size(w * 0.5f, h * 0.35f),
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx())
+        )
+        
+        // Draw vertical shaft
+        drawLine(
+            color = tint,
+            start = Offset(w * 0.5f, h * 0.7f),
+            end = Offset(w * 0.5f, h * 0.85f),
+            strokeWidth = 2.dp.toPx()
+        )
+        
+        // Draw base
+        drawLine(
+            color = tint,
+            start = Offset(w * 0.35f, h * 0.85f),
+            end = Offset(w * 0.65f, h * 0.85f),
+            strokeWidth = 2.dp.toPx()
+        )
+    }
+}
+
+fun saveRecentTicketsToStorage(context: Context, tickets: List<ServiceRequest>) {
+    try {
+        val sharedPref = context.getSharedPreferences("localStorage_recent_tickets", Context.MODE_PRIVATE)
+        val jsonArray = JSONArray()
+        tickets.forEach { ticket ->
+            val jsonObject = JSONObject().apply {
+                put("id", ticket.id)
+                put("title", ticket.title)
+                put("priority", ticket.priority)
+                put("category", ticket.category)
+                put("status", ticket.status)
+                put("site", ticket.site)
+                put("clientNotes", ticket.clientNotes)
+                put("updatedTime", ticket.updatedTime)
+                put("technicianNotes", ticket.technicianNotes)
+                put("timestamp", ticket.timestamp)
+                put("customerContact", ticket.customerContact)
+            }
+            jsonArray.put(jsonObject)
+        }
+        sharedPref.edit().putString("recent_tickets_key", jsonArray.toString()).apply()
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+}
+
+fun loadRecentTicketsFromStorage(context: Context): List<ServiceRequest> {
+    val result = mutableListOf<ServiceRequest>()
+    try {
+        val sharedPref = context.getSharedPreferences("localStorage_recent_tickets", Context.MODE_PRIVATE)
+        val jsonString = sharedPref.getString("recent_tickets_key", null)
+        if (!jsonString.isNullOrEmpty()) {
+            val jsonArray = JSONArray(jsonString)
+            for (i in 0 until jsonArray.length()) {
+                val jsonObject = jsonArray.getJSONObject(i)
+                result.add(
+                    ServiceRequest(
+                        id = jsonObject.optString("id", ""),
+                        title = jsonObject.optString("title", ""),
+                        priority = jsonObject.optString("priority", ""),
+                        category = jsonObject.optString("category", ""),
+                        status = jsonObject.optString("status", ""),
+                        site = jsonObject.optString("site", ""),
+                        clientNotes = jsonObject.optString("clientNotes", ""),
+                        updatedTime = jsonObject.optString("updatedTime", ""),
+                        technicianNotes = jsonObject.optString("technicianNotes", ""),
+                        timestamp = jsonObject.optString("timestamp", ""),
+                        customerContact = jsonObject.optString("customerContact", "")
+                    )
+                )
+            }
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+    return result
+}
+
+@Composable
+fun RecentTicketsSection(
+    recentTickets: List<ServiceRequest>,
+    onTicketClick: (ServiceRequest) -> Unit,
+    isDarkMode: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val theme = getThemeColors(isDarkMode)
+    val CleanWhite = theme.CleanWhite
+    val SlateNavy = theme.SlateNavy
+    val SlateSubtle = theme.SlateSubtle
+    val BorderSlate = theme.BorderSlate
+    val LightBackground = theme.LightBackground
+    val UnisysBlue = theme.UnisysBlue
+    val AccentTechBlue = theme.AccentTechBlue
+
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 12.dp)
+            .testTag("recent_tickets_list_card"),
+        colors = CardDefaults.cardColors(containerColor = CleanWhite),
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, BorderSlate)
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // Header
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .background(UnisysBlue.copy(alpha = 0.1f), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.List,
+                        contentDescription = "Recent Tickets List",
+                        tint = UnisysBlue,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                Column {
+                    Text(
+                        text = "Recent Tickets",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = SlateNavy
+                    )
+                    Text(
+                        text = "LocalStorage persistent cache (last 5 submitted)",
+                        fontSize = 11.sp,
+                        color = SlateSubtle
+                    )
+                }
+            }
+
+            if (recentTickets.isEmpty()) {
+                // Empty state
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = "No recent tickets",
+                        tint = SlateSubtle.copy(alpha = 0.6f),
+                        modifier = Modifier.size(32.dp)
+                    )
+                    Text(
+                        text = "No tickets submitted in this session.",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = SlateNavy.copy(alpha = 0.8f)
+                    )
+                    Text(
+                        text = "Create a ticket using the 'Create Ticket' form in the simulator above to see it stored here locally.",
+                        fontSize = 11.sp,
+                        color = SlateSubtle,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
+                }
+            } else {
+                // List of tickets
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    recentTickets.forEach { ticket ->
+                        RecentTicketItem(
+                            ticket = ticket,
+                            onClick = { onTicketClick(ticket) },
+                            theme = theme
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun RecentTicketItem(
+    ticket: ServiceRequest,
+    onClick: () -> Unit,
+    theme: ThemeColors
+) {
+    val animAlpha = remember { Animatable(0f) }
+    val animOffsetY = remember { Animatable(12f) }
+
+    LaunchedEffect(ticket.id) {
+        launch {
+            animAlpha.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(durationMillis = 400, easing = LinearOutSlowInEasing)
+            )
+        }
+        launch {
+            animOffsetY.animateTo(
+                targetValue = 0f,
+                animationSpec = tween(durationMillis = 350, easing = LinearOutSlowInEasing)
+            )
+        }
+    }
+
+    val CleanWhite = theme.CleanWhite
+    val SlateNavy = theme.SlateNavy
+    val SlateSubtle = theme.SlateSubtle
+    val BorderSlate = theme.BorderSlate
+    val LightBackground = theme.LightBackground
+    val UnisysBlue = theme.UnisysBlue
+    val AccentTechBlue = theme.AccentTechBlue
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                alpha = animAlpha.value
+                translationY = animOffsetY.value
+            }
+            .clickable { onClick() }
+            .testTag("recent_ticket_item_${ticket.id}"),
+        color = LightBackground,
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, BorderSlate)
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Ticket ID & Priority Badge
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = ticket.id,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = UnisysBlue,
+                        style = androidx.compose.ui.text.TextStyle(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                    )
+                    
+                    // Priority Badge
+                    val priorityColor = when {
+                        ticket.priority.contains("P1") -> TicketP1Red
+                        ticket.priority.contains("P2") -> Color(0xFFF97316) // orange
+                        else -> AccentTechBlue
+                    }
+                    Box(
+                        modifier = Modifier
+                            .background(priorityColor.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
+                            .border(1.dp, priorityColor.copy(alpha = 0.3f), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = ticket.priority.substringBefore(" -"),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = priorityColor
+                        )
+                    }
+                }
+
+                // Date/Time
+                Text(
+                    text = ticket.updatedTime,
+                    fontSize = 11.sp,
+                    color = SlateSubtle
+                )
+            }
+
+            // Title
+            Text(
+                text = ticket.title,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = SlateNavy,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            // Category & Site Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Build,
+                        contentDescription = "Category",
+                        tint = SlateSubtle,
+                        modifier = Modifier.size(12.dp)
+                    )
+                    Text(
+                        text = ticket.category,
+                        fontSize = 11.sp,
+                        color = SlateSubtle,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .background(
+                                color = if (ticket.status == "Resolved") ServiceGreen else Color(0xFFF59E0B),
+                                shape = CircleShape
+                            )
+                    )
+                    Text(
+                        text = ticket.status,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (ticket.status == "Resolved") ServiceGreen else Color(0xFFF59E0B)
+                    )
+                }
             }
         }
     }
